@@ -1,5 +1,4 @@
 from yowsup.layers import YowProtocolLayer
-from yowsup.layers.auth.layer_authentication import YowAuthenticationProtocolLayer
 from yowsup.layers.axolotl.protocolentities import *
 from yowsup.layers.network.layer import YowNetworkLayer
 from yowsup.layers import EventCallback
@@ -48,7 +47,7 @@ class AxolotlBaseLayer(YowProtocolLayer):
             entity = ResultGetKeysIqProtocolEntity.fromProtocolTreeNode(resultNode)
             resultJids = entity.getJids()
             successJids = []
-            errorJids = {} #jid -> exception
+            errorJids = entity.getErrors() #jid -> exception
 
             for jid in getKeysEntity.jids:
                 if jid not in resultJids:

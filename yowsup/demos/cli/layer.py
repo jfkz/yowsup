@@ -1,11 +1,11 @@
 from .cli import Cli, clicmd
 from yowsup.layers.interface import YowInterfaceLayer, ProtocolEntityCallback
-from yowsup.layers.auth import YowAuthenticationProtocolLayer
 from yowsup.layers import YowLayerEvent, EventCallback
 from yowsup.layers.network import YowNetworkLayer
 import sys
 from yowsup.common import YowConstants
 import datetime
+import time
 import os
 import logging
 import threading
@@ -389,9 +389,21 @@ class YowsupCliLayer(Cli, YowInterfaceLayer):
 
     @clicmd("Request contacts statuses")
     def statuses_get(self, contacts):
+
+        def on_success(entity, original_iq_entity):
+            # type: (ResultStatusesIqProtocolEntity, GetStatusesIqProtocolEntity) -> None
+            status_outs = []
+            for jid, status_info in entity.statuses.items():
+                status_outs.append("[user=%s status=%s last_updated=%s]" % (jid, status_info[0], status_info[1]))
+            self.output("\n".join(status_outs), tag="statuses_get result")
+
+        def on_error(entity, original_iq):
+            # type: (ResultStatusesIqProtocolEntity, GetStatusesIqProtocolEntity) -> None
+            logger.error("Failed to get statuses")
+
         if self.assertConnected():
             entity = GetStatusesIqProtocolEntity([self.aliasToJid(c) for c in contacts.split(',')])
-            self.toLower(entity)
+            self._sendIq(entity, on_success, on_error)
 
     @clicmd("Send paused state")
     def state_paused(self, jid):
@@ -419,14 +431,27 @@ class YowsupCliLayer(Cli, YowInterfaceLayer):
         return True
 
     ######## receive #########
-
+    
+    @ProtocolEntityCallback("presence")
+    def onPresenceChange(self, entity):
+        status="offline"
+        if entity.getType() is None:
+            status="online"     
+        ##raw fix for iphone lastseen deny output
+        lastseen = entity.getLast()
+        if status is "offline" and lastseen is "deny":
+            lastseen = time.time()
+        ##
+        self.output("%s %s %s lastseen at: %s" % (entity.getFrom(), entity.getTag(), status, lastseen))
+        
     @ProtocolEntityCallback("chatstate")
     def onChatstate(self, entity):
         print(entity)
 
     @ProtocolEntityCallback("iq")
     def onIq(self, entity):
-        print(entity)
+        if not isinstance(entity, ResultStatusesIqProtocolEntity):  # already printed somewhere else
+            print(entity)
 
     @ProtocolEntityCallback("receipt")
     def onReceipt(self, entity):
@@ -482,13 +507,16 @@ class YowsupCliLayer(Cli, YowInterfaceLayer):
             self.output("Sent delivered receipt"+" and Read" if self.sendRead else "", tag = "Message %s" % message.getId())
 
     def getTextMessageBody(self, message):
-        return message.getBody()
+        if isinstance(message, TextMessageProtocolEntity):
+            return message.conversation
+        elif isinstance(message, ExtendedTextMessageProtocolEntity):
+            return str(message.message_attributes.extended_text)
+        else:
+            raise NotImplementedError()
 
     def getMediaMessageBody(self, message):
-        if message.media_type in ("image", "audio", "video", "document"):
-            return self.getDownloadableMediaMessageBody(message)
-        else:
-            return "[Media Type: %s]" % message.media_type
+        # type: (DownloadableMediaMessageProtocolEntity) -> str
+        return str(message.message_attributes)
 
     def getDownloadableMediaMessageBody(self, message):
         return "[media_type={media_type}, length={media_size}, url={media_url}, key={media_key}]".format(
@@ -543,9 +571,6 @@ class YowsupCliLayer(Cli, YowInterfaceLayer):
         # write to file example:
         #resultGetPictureIqProtocolEntiy.writeToFile("/tmp/yowpics/%s_%s.jpg" % (getPictureIqProtocolEntity.getTo(), "preview" if resultGetPictureIqProtocolEntiy.isPreview() else "full"))
         pass
-
-    def __str__(self):
-        return "CLI Interface Layer"
 
     @clicmd("Print this message")
     def help(self):
